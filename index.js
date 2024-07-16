@@ -6,10 +6,14 @@ const jwt = require("jsonwebtoken");
 require("dotenv").config();
 const cookieParser = require("cookie-parser");
 const port = process.env.PORT || 5000;
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 // middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://localhost:5173"],
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -34,15 +38,16 @@ async function run() {
 
     // Middleware
     const verifyToken = (req, res, next) => {
-      if (!req.headers.authorization) {
-        return res.status(401).send({ message: "unauthorized access" });
+      const token = req.headers.authorization?.split(" ")[1];
+      if (!token) {
+        return res.status(401).send({ message: "Unauthorized access" });
       }
-      const token = req.headers.authorization.split(" ")[1];
+
       jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
         if (err) {
-          return res.status(401).send({ message: "unauthorized access" });
+          return res.status(401).send({ message: "Unauthorized access" });
         }
-        req.decoded = decoded;
+        req.user = decoded;
         next();
       });
     };
@@ -91,11 +96,11 @@ async function run() {
     });
 
     app.post("/login", async (req, res) => {
-      const { identifier, password } = req.body;
+      const { username, password } = req.body;
 
       // Check if user exists by email or phone number
       const user = await userCollection.findOne({
-        $or: [{ email: identifier }, { phone: identifier }],
+        $or: [{ email: username }, { phone: username }],
       });
 
       if (!user) {
@@ -108,15 +113,26 @@ async function run() {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      // Generate JWT token upon successful login
       const token = jwt.sign(
         { id: user._id, email: user.email },
         process.env.ACCESS_TOKEN_SECRET,
-        {
-          expiresIn: "1h",
-        }
+        { expiresIn: "1h" }
       );
 
       res.json({ token });
+    });
+
+    app.post("/verify-token", verifyToken, async (req, res) => {
+      const userEmail = req.user.email;
+      console.log(req.user);
+      const user = await userCollection.findOne({
+        email: userEmail,
+      });
+
+      const { password, ...userInfo } = user;
+      console.log(userInfo);
+      res.send(userInfo);
     });
 
     // Send a ping to confirm a successful connection
