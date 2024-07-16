@@ -33,7 +33,7 @@ const userCollection = database.collection("userCollection");
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
+    // Connect the client to the server (optional starting in v4.7)
     // await client.connect();
 
     // Middleware
@@ -51,15 +51,6 @@ async function run() {
         next();
       });
     };
-
-    // JWT
-    app.post("/jwt", async (req, res) => {
-      const user = req.body;
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
-      });
-      res.send({ token });
-    });
 
     app.post("/register", async (req, res) => {
       const userMail = await userCollection.findOne({ email: req.body.email });
@@ -81,16 +72,16 @@ async function run() {
         phone: req.body.phone,
         email: req.body.email,
         password: securePass,
+        role: req.body.role,
+        status: req.body.status,
+        balance: req.body.balance,
       };
 
       await userCollection.insertOne(user);
 
       const token = jwt.sign(
         { email: req.body.email },
-        process.env.ACCESS_TOKEN_SECRET,
-        {
-          expiresIn: "1h",
-        }
+        process.env.ACCESS_TOKEN_SECRET
       );
       res.send(token);
     });
@@ -123,16 +114,80 @@ async function run() {
       res.json({ token });
     });
 
+    // Ensure the verifyToken middleware is applied to this route
     app.post("/verify-token", verifyToken, async (req, res) => {
       const userEmail = req.user.email;
-      console.log(req.user);
       const user = await userCollection.findOne({
         email: userEmail,
       });
 
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
       const { password, ...userInfo } = user;
-      console.log(userInfo);
       res.send(userInfo);
+    });
+
+    app.post("/send", async (req, res) => {
+      const { number, amount, id, password } = req.body;
+
+      let parseAmount = parseInt(amount);
+
+      const data = await userCollection.findOne({ _id: new ObjectId(id) });
+
+      //   TODO: uncomment this after done
+
+      //   if (data.status === "pending" || data.status === "block") {
+      //     return res.status(404).json({ error: "user is not verified" });
+      //   }
+
+      const passwordMatch = await bcrypt.compare(password, data.password);
+      console.log(passwordMatch);
+
+      if (!passwordMatch) {
+        return res.status(404).json({ error: "Wrong Password" });
+      }
+
+      if (parseAmount < 50) {
+        return res.status(404).json({ error: "Minimum sending amount 50 tk" });
+      }
+
+      const receiverAmount = parseAmount;
+
+      if (parseAmount > 100) {
+        const parseAmount = parseAmount + 5;
+      }
+
+      if (data.balance < parseAmount) {
+        return res
+          .status(404)
+          .json({ error: "You Don't have sufficient balance" });
+      }
+
+      const senderQuery = {
+        $set: {
+          balance: balance - parseAmount,
+        },
+      };
+
+      const receiverQuery = {
+        $set: {
+          balance: balance + receiverAmount,
+        },
+      };
+
+      const updateSender = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        senderQuery
+      );
+
+      const updateReceiver = await userCollection.updateOne(
+        { number: number },
+        receiverQuery
+      );
+
+      res.send(updateSender, updateReceiver);
     });
 
     // Send a ping to confirm a successful connection
