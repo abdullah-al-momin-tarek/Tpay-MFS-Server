@@ -30,6 +30,9 @@ const client = new MongoClient(uri, {
 
 const database = client.db("Tpay-MFS");
 const userCollection = database.collection("userCollection");
+const transactionHistoryCollection = database.collection(
+  "transactionHistoryCollection"
+);
 
 async function run() {
   try {
@@ -195,7 +198,37 @@ async function run() {
         receiverQuery
       );
 
-      res.send(updateSender, updateReceiver);
+      if (
+        updateSender.modifiedCount !== 1 ||
+        updateReceiver.modifiedCount !== 1
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Something went wrong. Try again" });
+      }
+
+      const transaction = {
+        type: "send",
+        amount: receiverAmount,
+        status: "successful",
+        sender: {
+          id: id,
+          name: data.name,
+          phone: data.phone,
+          role: data.role,
+        },
+        receiver: {
+          id: receiver._id,
+          name: receiver.name,
+          phone: receiver.phone,
+          role: receiver.role,
+        },
+        date: new Date(),
+      };
+
+      const history = await transactionHistoryCollection.insertOne(transaction);
+
+      res.send(history);
     });
 
     // TODO: need to apply verifyToken
@@ -260,7 +293,96 @@ async function run() {
         agentQuery
       );
 
-      res.send(updateUser, updateAgent);
+      if (updateUser.modifiedCount !== 1 || updateAgent.modifiedCount !== 1) {
+        return res
+          .status(400)
+          .json({ error: "Something went wrong. Try again" });
+      }
+
+      const transaction = {
+        type: "cashOut",
+        amount: outAmount,
+        status: "successful",
+        sender: {
+          id: id,
+          name: data.name,
+          phone: data.phone,
+          role: data.role,
+        },
+        receiver: {
+          id: receiver._id,
+          name: receiver.name,
+          phone: receiver.phone,
+          role: receiver.role,
+        },
+        date: new Date(),
+      };
+
+      const result = await transactionHistoryCollection.insertOne(transaction);
+
+      res.send(result);
+    });
+
+    // Cash In
+    app.post("/cashin", async (req, res) => {
+      const { number, amount, id, password } = req.body;
+      let inAmount = parseInt(amount);
+
+      const data = await userCollection.findOne({ _id: new ObjectId(id) });
+
+      //   TODO: uncomment this after done
+
+      //   if (data.status === "pending" || data.status === "block") {
+      //     return res.status(404).json({ error: "user is not verified" });
+      //   }
+
+      console.log(data);
+
+      if (inAmount < 50) {
+        return res.status(400).json({ error: "Minimum cashin amount 50 tk" });
+      }
+
+      const passwordMatch = await bcrypt.compare(password, data.password);
+      console.log(passwordMatch);
+
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Wrong password" });
+      }
+
+      const agent = await userCollection.findOne({ phone: number });
+
+      if (agent?.role !== "agent") {
+        return res.status(400).json({ error: "You can only request to agent" });
+      }
+
+      if (updateUser.modifiedCount !== 1 || updateAgent.modifiedCount !== 1) {
+        return res
+          .status(400)
+          .json({ error: "Something went wrong. Try again" });
+      }
+
+      const transaction = {
+        type: "cashOut",
+        amount: inAmount,
+        status: "pending",
+        sender: {
+          id: id,
+          name: data.name,
+          phone: data.phone,
+          role: data.role,
+        },
+        receiver: {
+          id: agent._id,
+          name: agent.name,
+          phone: agent.phone,
+          role: agent.role,
+        },
+        date: new Date(),
+      };
+
+      const result = await transactionHistoryCollection.insertOne(transaction);
+
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
