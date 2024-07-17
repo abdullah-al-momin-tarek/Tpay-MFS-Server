@@ -128,7 +128,7 @@ async function run() {
       const { password, ...userInfo } = user;
       res.send(userInfo);
     });
-
+    // TODO: need to apply verifyToken
     app.post("/send", async (req, res) => {
       const { number, amount, id, password } = req.body;
 
@@ -142,27 +142,35 @@ async function run() {
       //     return res.status(404).json({ error: "user is not verified" });
       //   }
 
+      if (parseAmount < 50) {
+        return res.status(400).json({ error: "Minimum sending amount 50 tk" });
+      }
+
       const passwordMatch = await bcrypt.compare(password, data.password);
       console.log(passwordMatch);
 
       if (!passwordMatch) {
-        return res.status(404).json({ error: "Wrong Password" });
-      }
-
-      if (parseAmount < 50) {
-        return res.status(404).json({ error: "Minimum sending amount 50 tk" });
+        return res.status(401).json({ error: "Wrong Password" });
       }
 
       const receiverAmount = parseAmount;
 
       if (parseAmount > 100) {
-        const parseAmount = parseAmount + 5;
+        parseAmount = parseAmount + 5;
       }
 
       if (data.balance < parseAmount) {
         return res
-          .status(404)
+          .status(400)
           .json({ error: "You Don't have sufficient balance" });
+      }
+
+      const receiver = await userCollection.findOne({ phone: number });
+
+      if (receiver?.role !== "user") {
+        return res
+          .status(400)
+          .json({ error: "You can only send money to user" });
       }
 
       const senderQuery = {
@@ -183,11 +191,76 @@ async function run() {
       );
 
       const updateReceiver = await userCollection.updateOne(
-        { number: number },
+        { phone: number },
         receiverQuery
       );
 
       res.send(updateSender, updateReceiver);
+    });
+
+    // TODO: need to apply verifyToken
+    app.post("/cashOut", async (req, res) => {
+      const { number, amount, id, password } = req.body;
+      let outAmount = parseInt(amount);
+
+      const data = await userCollection.findOne({ _id: new ObjectId(id) });
+
+      //   TODO: uncomment this after done
+
+      //   if (data.status === "pending" || data.status === "block") {
+      //     return res.status(404).json({ error: "user is not verified" });
+      //   }
+
+      console.log(data);
+
+      if (outAmount < 50) {
+        return res.status(400).json({ error: "Minimum Cashout amount 50 tk" });
+      }
+
+      const passwordMatch = await bcrypt.compare(password, data.password);
+      console.log(passwordMatch);
+
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Wrong password" });
+      }
+
+      if (data.balance < outAmount) {
+        return res.status(400).json({ error: "Insufficient balance" });
+      }
+
+      const receiver = await userCollection.findOne({ phone: number });
+
+      if (receiver?.role !== "agent") {
+        return res
+          .status(400)
+          .json({ error: "You can only cashout with agent" });
+      }
+
+      outAmount = outAmount + outAmount * 0.015;
+
+      const userQuery = {
+        $set: {
+          balance: balance - outAmount,
+        },
+      };
+
+      const agentQuery = {
+        $set: {
+          balance: balance + outAmount,
+        },
+      };
+
+      const updateUser = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        userQuery
+      );
+
+      const updateAgent = await userCollection.updateOne(
+        { phone: number },
+        agentQuery
+      );
+
+      res.send(updateUser, updateAgent);
     });
 
     // Send a ping to confirm a successful connection
